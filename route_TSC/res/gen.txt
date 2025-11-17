@@ -1,0 +1,8 @@
+/*** traffic flow ***/
+python D:\sumo\tools\randomTrips.py -n 4_Phase.net.xml -b 0 -e 1200 --period 2 --fringe-factor 7200 -L -o uniform_11.trips.xml
+
+python D:\sumo\tools\randomTrips.py -n 4_Phase.net.xml -b 1200 -e 2400 --period 1 --fringe-factor 7200 -L -o uniform_22.trips.xml
+
+python D:\sumo\tools\randomTrips.py -n 4_Phase.net.xml -b 2400 -e 3600 --period 0.5 --fringe-factor 7200 -L -o uniform_33.trips.xml
+
+D:\sumo\bin\duarouter -n 4_Phase.net.xml --route-files=uniform_11.trips.xml,uniform_22.trips.xml,uniform_33.trips.xml -o uniform_4200.rou.xml

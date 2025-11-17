@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+	<input>
+		<net-file value="4_Phase.net.xml"/>
+		<route-files value="SUMO_anon_4_4_hangzhou_real_5694.rou.xml"/>
+	</input>
+	<time>
+		<begin value="0"/>
+		<end value="9999"/>
+	</time>
+</configuration>

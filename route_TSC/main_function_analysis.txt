@@ -1,0 +1,91 @@
+start.py 中 main 函数解析
+
+一、函数签名与整体用途
+- 签名：main(exe=False, name=None, idx=0, comment="", seed='25', light_path=None, ratio=0.5)
+- 作用：作为训练/评估（执行）交通信号控制系统（可选结合车辆路由 RL）的主入口。根据命令行参数与传参，初始化环境与多智能体、可选构建 RouterNet（DQN 或 PPO），随后按 episode 循环运行仿真，收集指标、按条件保存模型与结果，最终返回运行名。
+
+二、关键参数说明
+- exe：是否执行/评估模式；False 表示训练/预训练，True 表示执行/评估。
+- name：运行名或检查点路径；None 时会按模板自动生成（但函数中后续存在覆盖为实验名的逻辑）。
+- idx：起始 episode 索引；>0 时会加载部分模型（RouterNet）并从此索引开始循环。
+- comment：运行名附加备注。
+- seed：仿真随机种子，传给环境启动。
+- light_path：当使用车路协同（args.l2v）时用于加载信号控制器模型的路径（此处仅断言非空，加载逻辑注释掉）。
+- ratio：CAV 占比（启用路由 RL 时常用于决定 CAV 采样或状态维度等）。此值被赋给 args.rate。
+
+三、主要流程分解（按代码顺序）
+1) 线程与参数解析
+- torch.set_num_threads(1) 限制 PyTorch 线程数。
+- ap = get_common_args() → 初步解析通用参数 args。
+- 根据 args.agent_type 或 config 决定具体算法参数解析器（PPO/MAT/MAPPO/MA2C 等），再次 parse_args()。
+- 将空间特征类型写入全局 config：config.SPATIAL["TYPE"] = args.spatial。
+- 将传入的 ratio 赋值到 args.rate。
+
+2) 运行期统计容器与可视化器
+- 定义多个列表：awt/awc/aws/awl/aww/awd 用于时长、等待数、速度、时耗、等待时长、发车延误等指标；rewards、aw_length、loss 等。
+- 创建 o = Visualization()，用于输出 CSV/作图。
+
+3) 环境与多智能体初始化
+- execute = exe。
+- 使用 lights.init(args, execute, path=f"./res/{args.map}/train.sumocfg") 初始化多路口智能体与环境句柄（Lights 对象）。
+
+4) 运行名 name 的处理
+- 若 name 为 None，按模板生成：
+  f"{args.agent_type}-{args.spatial}-{args.temporal}-{时间戳}-{args.map}-UseLighter_{args.org if args.lighter else False}-UseRouter_{args.rate if args.router else 0.0}-Algo_{args.algo}-{comment}"
+- 随后无论是否自定义 name，代码都将 name 覆盖为 f"{ratio}_{args.algo}_0315"（实验硬编码），导致前面的自动命名被替代。
+- ap.add_argument("--dir", default=name) 补充目录参数。
+
+5) 路由 RL（可选）构建 RouterNet
+- 若 args.router 为 True：
+  - 根据 map/direction 选择不同的 net.xml，计算路网相邻边关系 adj_edge。
+  - 计算路由状态维度 state_dim = args.agent_num * args.road_feature * 4 * 3 + args.cav_feature。
+  - 按 config.ROUTER_RL["ALGO"] 构建 DQNAgent 或 PPOAgent → RouterNet。
+
+6) 预加载模型与循环前置
+- max_t = 999；loss = []。
+- 若 idx > 0：调用 RouterNet.load_model(name + '/ep50')（用于热启动路由模型）。
+
+7) episode 主循环：for i in range(idx, args.episode)
+- 日志打印当前 ep。
+- 获取智能体列表 agent_list；若 agent_type == "MAT"，调用 agents.clear_buf()。
+- 遍历 agent_list：统计 agent.rl_model.execution 为 True 的数量 cnt，并重置 agent.his_speed。
+- 若 cnt == len(agent_list)，说明所有智能体均处于执行模式，则将 execute = True。
+- 写入 config.SIMULATION['EXECUTE'] = execute。
+- 启动/重启仿真：
+  - 若 i > idx 且非执行模式：env.start(execute, path=f"./res/{args.map}/train.sumocfg", seed=seed)。
+  - 否则若 i > idx（通常执行/评估时）：env.start(execute, seed=seed)（不传 path，使用默认或已有路径）。
+- 若 args.l2v：断言 light_path 非空（加载模型逻辑被注释）。
+- env.init_context(agent_list) 绑定环境与智能体上下文。
+- 创建输出目录 ./simudata/{name} 与 ./model/{name}。
+- CAV 相关：将 args.veh_num 设为 n=4200，k=int(4200*args.rate)，gen_cav 置空（随机采样与 CSV 读取在此函数中注释掉）。
+- 设置车辆类型参数：traci.vehicletype.setTau('DEFAULT_VEHTYPE', 2.0)。
+- 调用 episode.run(i, agents, o, args, execute, name, RouterNet, adj_edge, gen_cav)：
+  返回 reward, t, c, s, l, w, d, rt, _loss。
+- 记录各项指标（awt/awc/aws/awl/aww/awd），并将 _loss 追加到 loss。
+- 计算平均排队长度 avg_queue_length（此处为占位 0.0），写入 aw_length，并通过 o.csv_queue(aw_length, name) 输出。
+- 以 t 为优度判断最优：若 t < max_t，则创建 best_model 目录并保存 RouterNet（当 args.router 为 True），更新 max_t。
+- 若 args.router：常规保存 RouterNet.save_model(name)。
+- 若非执行模式（训练）：输出 o.csv_reward(agents, name)。
+- 周期性 checkpoint：当 i ≥ 5 且 i%5==0，创建 ./model/{name}/ep{i}，并在开启路由时保存 RouterNet 至该检查点目录。
+
+8) 循环后汇总输出与返回
+- o.csv_av(loss, name, "loss")。
+- 将 awt/awc/aws/awl/aww/awd 分别以 "train-*" 或 "execution-*" 名称（取决于 execute）写入 CSV。
+- return name。
+
+四、输出产物
+- 目录：
+  - 模型：./model/{name}/、./model/{name}/best_model、以及按 ep 每 5 步保存的子目录。
+  - 数据：./simudata/{name}/ 下的各类 CSV（奖励、队列、时长/等待/速度/损失/延误等）。
+
+五、注意事项与潜在坑
+- 覆盖运行名：函数中强制 name = f"{ratio}_{args.algo}_0315" 会覆盖前面自动生成或外部传入的 name；若不希望被覆盖，需移除此行或做条件化控制。
+- RouterNet 依赖条件：仅当 args.router=True 时才会实例化 RouterNet；如果后续代码尝试使用 RouterNet，需要确保该标志被正确设置。
+- env.start 的 path 参数：执行模式 i>idx 分支未传 path，依赖默认环境上下文；若需要更换地图/配置，需显式传 path。
+- 队列长度统计：avg_queue_length 的实际计算被注释，当前仅输出 0.0 占位；如需此指标，需恢复/完善对应统计逻辑。
+- l2v 模式：仅断言 light_path 非空，实际加载模型的代码被注释，使用前需补全实现。
+- idx>0 的加载：仅加载 RouterNet 的 ep50（硬编码），且未考虑不存在 ep50 的情况，需要健壮性处理。
+
+六、与 exe_flow 的区别简述
+- main 支持训练与执行二合一流程，且 gen_cav 由本函数内（注释掉）或外部控制，不从 CSV 读取。
+- exe_flow 专注于评估阶段：强制加载 RouterNet，按给定 sumocfg 运行，读取 CAV CSV，导出更丰富的评估指标明细到 {name}/testFlow 与 ./simudata/{name}/testFlow。

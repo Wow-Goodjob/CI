@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+	<input>
+		<net-file value="SUMO_roadnet_4_4_actuated.net.xml"/>
+		<route-files value="SUMO_anon_4_4_hangzhou_real.rou.xml"/>
+	</input>
+	<time>
+		<begin value="0"/>
+		<end value="3600"/>
+	</time>
+</configuration>
