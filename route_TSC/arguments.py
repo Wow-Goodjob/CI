@@ -3,7 +3,8 @@ import argparse
 
 def get_common_args(EXEC=False):
     ap = argparse.ArgumentParser()
-
+    ap.add_argument("--joint_training",action="store_true",default=False)
+    ap.add_argument("--router_train_freq",type=int,default=3)
     ''' curiosity DQN'''
     ap.add_argument("--forward_scale", type=float, default=0.8)  # 前向预测模型损失函数的比例为 0.8
     ap.add_argument("--inverse_scale", type=float, default=0.2)  # 反向预测模型损失函数的比例为 0.2
@@ -16,7 +17,7 @@ def get_common_args(EXEC=False):
 
     ap.add_argument("--l2v", type=bool, default=False)
 
-    ap.add_argument("--algo", type=str, default="nav", choices=["self_org", "hatt_router", "iql_b", "astar_dqn", "adaptive", "nav", "dso"])
+    ap.add_argument("--algo", type=str, default="astar_dqn", choices=["self_org", "hatt_router", "iql_b", "astar_dqn", "adaptive", "nav", "dso"])
 
     ap.add_argument("--threshold", type=int, default=10000)
 
@@ -36,7 +37,8 @@ def get_common_args(EXEC=False):
     ap.add_argument("--action_dim", type=int, default=2)
     ap.add_argument("--direction", type=int, default=3)
     # ap.add_argument("--action_embedding", type=int, default=2)
-    ap.add_argument("--state_dim", type=int, default=38)  # state_dim = 16 + phase + phase_duration
+    #ap.add_argument("--state_dim", type=int, default=38)  # state_dim = 16 + phase + phase_duration
+    ap.add_argument("--state_dim", type=int, default=36)  # state_dim = 16 + phase + phase_duration
     ap.add_argument("--global_state_dim", type=int, default=50 * 9)
     ap.add_argument("--counter_factual",type=float,default=1e-5)
 
@@ -45,7 +47,7 @@ def get_common_args(EXEC=False):
         ap.add_argument("--episode", type=int, default=1)
         ap.add_argument("--buffer_size", type=int, default=0)
     else:
-        ap.add_argument("--episode", type=int, default=2)
+        ap.add_argument("--episode", type=int, default=70)
         ap.add_argument("--buffer_size", type=int, default=1000)
     ap.add_argument("--train_eps", type=int, default=35)
     ap.add_argument("--train_thr", type=int, default=0)

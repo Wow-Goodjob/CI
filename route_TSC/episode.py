@@ -220,3 +220,126 @@ def run(ep, agents, o, args, execute, name=None, router=None, adj_edge=None, gen
     return np.array(rewards), tripinfo.get_tripinfo('duration'), tripinfo.get_tripinfo('waitingCount'), \
            tripinfo.get_tripinfo('arrivalSpeed'), tripinfo.get_tripinfo('timeLoss'), \
            tripinfo.get_tripinfo('waitingTime'), tripinfo.get_tripinfo('departDelay'), total_arrived / len(cav_list), loss
+
+def run_joint(ep, agents, o, args, execute, name=None, router=None, adj_edge=None, gen_cav=[]):
+    if args.algo=="self_org":
+        from algo.self_org_agent import SelfOrgAgent as CAVAgent
+    elif args.algo=="astar_dqn":
+        from algo.astar_dqn import AstarDQN as CAVAgent
+    else:
+        from agent import CAVAgent as CAVAgent
+
+    global writer_step, ep_writer_step
+    config.SIMULATION["EP"]=ep
+
+    config.RL["EPSILON"] = max(config.RL["EPSILON"] * pow(config.RL["EPSILON_DECAY_RATE"], config.SIMULATION["EP"]),
+                               config.RL["MIN_EPSILON"])
+    config.ROUTER_RL["EPSILON"] = max(config.ROUTER_RL["EPSILON"] * pow(config.ROUTER_RL["EPSILON_DECAY_RATE"],
+                                                                        config.SIMULATION["EP"]),
+                                      config.ROUTER_RL["MIN_EPSILON"])
+
+    if execute:
+        config.ROUTER_RL["EPSILON"] = 0
+        config.RL["EPSILON"] = 0
+
+    print(f'epsilon: {config.RL["EPSILON"]}, router_epsilon: {config.ROUTER_RL["EPSILON"]}')
+
+    for i in range(len(agents.agent_list)):
+        agent=agents.agent_list[i]
+        state=env.get_state(agent,agent.obs_name,agent_list=agents.agent_list)
+        agent.action=0
+        agent.state=state
+    sumo_duration = 12600 if execute else 3600
+    '''total_arrived=0
+    rewards=[]
+    cav_episode_rewards=[]
+    loss=[]'''
+    rewards=[]
+    total_arrived = 0
+    actions = [0] * args.agent_num
+    cur_actions = [0] * args.agent_num
+    states = []
+    next_states = []
+    episode_rewards = []
+    cav_episode_rewards = []
+    episode_durations = []
+    average_episode_rewards = []
+    for agent in agents.agent_list:  # initial state
+        states.append(env.get_length_state(agent, green=0))
+        # states.append(env.get_state(agent, state_type=agent.obs_name, agent_list=agents.agent_list))
+
+    rate = args.rate  # CAV penetration rate
+    cav_list = []
+    leaving_cav_set = set()
+    lanes = traci.lane.getIDList()
+    lanes = [lane_id for lane_id in lanes if ":" not in lane_id]
+    road_list, light_count, lane_dict = env.get_map_lanes(agents.agent_list, lanes)
+    veh_id_list = dict()
+    loaded_veh = 0
+    greens = [0] * args.agent_num
+    cav_step_rewards = []
+    loss = []
+
+    for t in range(3600):
+        reward,terminated=agents.d_step(tm=t)
+        rewards.append(reward)
+
+        if args.joint_training and router:
+            road_state = env.get_edge_state(agents.agent_list,road_list)
+            traffic_light_state = env.get_light_state(agents.agent_list)
+
+            loaded_list = list(traci.simulation.getDepartedIDList())
+            if len(loaded_list) > 0 and len(gen_cav) > 0:
+                agents.cav_list.extend([CAVAgent(cav, router, adj_edge, args)
+                                        for cav in loaded_list if int(cav) in set(gen_cav)])
+
+            cav_step_rewards = []
+            for cav in agents.cav_list:
+                if (cav.veh_id not in agents.leaving_cav_set and not cav.arrived()
+                        and not cav.done and cav.is_valid()):
+
+                    cav_state = cav.get_router_state2(
+                        copy.deepcopy(road_state), traffic_light_state,
+                        agents.road_list, agents.greens, agents.light_count, agents.lane_dict
+                    )
+                    router_avail_action = cav.get_avail_action()
+
+                    if config.ROUTER_RL["ALGO"] == "DQN":
+                        action = cav.router.act(np.array(cav_state), avail_actions=router_avail_action)
+
+                    if cav.act:
+                        reward = cav.get_reward(road_state=road_state)
+                        cav.append_reward(reward)
+                        if cav.reward[0] < 0:
+                            cav.router.store(cav.cav_state, reward, cav_state, done=cav.done, actions=cav.action)
+
+                    cav.step(action)
+                    cav.cav_state = cav_state
+
+                if cav.done and len(cav.reward) > 0:
+                    cav_step_rewards.append(sum(cav.reward) / len(cav.reward))
+
+            cav_episode_rewards.extend(cav_step_rewards)
+
+            if not execute and t % 3 == 0:
+                _loss = router.learn()
+                if _loss:
+                    loss.append(_loss / config.ROUTER_RL["BATCH_SIZE"])
+
+        env.step()
+
+        if args.joint_training:
+            agents.leaving_cav_set = agents.leaving_cav_set | set(traci.simulation.getArrivedIDList())
+
+    for cav in agents.cav_list:
+        if cav.veh_id in agents.leaving_cav_set:
+            total_arrived += 1
+
+    print("Loaded CAVs:", len(agents.cav_list))
+    print("Arrived CAVs:", total_arrived)
+    env.close()
+
+    return  (np.array(rewards), tripinfo.get_tripinfo('duration'),
+            tripinfo.get_tripinfo('waitingCount'), tripinfo.get_tripinfo('arrivalSpeed'),
+            tripinfo.get_tripinfo('timeLoss'), tripinfo.get_tripinfo('waitingTime'),
+            tripinfo.get_tripinfo('departDelay'), total_arrived, loss)

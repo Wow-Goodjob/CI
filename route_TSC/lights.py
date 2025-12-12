@@ -3,6 +3,34 @@ import numpy as np
 import config
 import env
 import traffic_light as tl
+import os
+import sys
+import platform
+if platform.system().lower() == 'linux':
+    os.environ['SUMO_HOME'] = "/usr/share/sumo"
+    sys.path.append(os.path.join(os.environ.get("SUMO_HOME"), 'tools'))
+from matplotlib import pyplot as plt
+import numpy as np
+import traci
+import torch
+import statistics
+import argparse
+import time
+# from torchsummary import summary
+import traffic_light
+import random
+import pandas as pd
+import csv
+
+import config
+import episode
+import env
+import lights
+import tripinfo
+from traffic_light import TLight
+from utils import XmlGenerator, CsvInterpreter, Visualization
+from arguments import *
+import utils
 
 
 # implement global agent
@@ -36,6 +64,20 @@ class Lights:
 
         self.a = None
         self.a_logprob = None
+
+        self.router_net=None
+        self.adj_edge=None
+        self.gen_cav=[]
+        self.cav_list=[]
+        self.leaving_cav_set=set()
+
+        self.road_list=None
+        self.light_count=None
+        self.lane_dict=None
+        self.greens=None
+
+        self.joint_training=args.joint_training
+        self.router_training_step = 0
 
     def step(self):
         rewards = 0
@@ -71,7 +113,56 @@ class Lights:
             agent.write_log()
             agent.write_reward(reward)
 
+        if self.joint_training and self.router_net and not excute:
+            road_state=env.get_edge_state(self.agent_list,self.road_list)
+            traffic_light_state = env.get_light_state(self.agent_list)
+
+            for cav in self.cav_list:
+                if cav.veh_id not in self.leaving_cav_set and not cav.arrived() and not cav.done and cav.is_valid():
+                    cav_state=cav.get_router_state2(
+                        copy.deepcopy(road_state),traffic_light_state,
+                        self.road_list,self.greens,self.light_count,self.lane_dict
+                    )
+                    router_avail_action = cav.get_avail_action()
+
+                    if config.ROUTER_RL["ALGO"] == "DQN":
+                        action = cav.router.act(np.array(cav_state),avail_actions=router_avail_action)
+
+                    if cav.act:
+                        reward=cav.get_reward(road_state=road_state)
+                        cav.append_reward(reward)
+                        if cav.reward[0]<0:
+                            cav.router.store(cav.cav_state,reward,cav_state,done=cav.done,actions=cav.action)
+
+                        cav.step(action)
+                        cav.cav_state=cav_state
+            self.router_training_step+=1
+            if self.router_training_step % 3 ==0:
+                _loss=self.router_net.learn()
+                if _loss:
+                    pass
+
         return rewards / len(self.agent_list)
+
+    def init_router(self,args):
+        if args.router:
+            from dqnagent import DQNAgent
+            from ppoagent import PPOAgent
+
+            self.adj_edge=env.find_adj_edge(f'./res/{args.map}/4_Phase.net.xml')
+            state_dim=args.agent_num*args.road_feature*4*3+args.cav_feature
+
+            if config.ROUTER_RL["ALGO"]=="DQN":
+                self.router_net=DQNAgent(
+                    state_dim=state_dim,action_dim=args.directions,
+                    args=args,tl_id="veh",new_type="",net_config=config.ROUTER_RL
+                )
+
+            lanes=traci.lane.getIDList()
+            lanes=[lane_id for lane_id in lanes if ":" not in lane_id]
+            self.road_list,self.light_count,self.lane_dict=env.get_map_lanes(self.agent_list,lanes)
+            if self.greens is None:
+                self.greens=[0]*len(self.agent_list)
 
     def d_step(self, tm=-1):
         rewards = 0
@@ -324,7 +415,12 @@ class Lights:
                     c_model.rl_model.learn()
                 self.global_state = next_state
                 self.a, self.a_logprob = c_model.rl_model.choose_action(self.global_state)  # next action
-
+        elif self.agent_type=="PPO":
+            for i in range(len(self.agent_list)):
+                reward, self.action_set[i] = self.agent_list[i].step(self.action_set[i], self.agent_list)
+                duration, phase_index, phase_type = self.action_set[i]
+                env.set_phase(self.agent_list[i], 2 * phase_index if phase_type == 'G' else 2 * phase_index + 1)
+            env.step()
         else:  # DTDE
             for i in range(len(self.agent_list)):
                 if self.agent_type == "QMIX":
@@ -451,11 +547,11 @@ def create_agent_list(args, execution=False):
         if i >= 0:
             agent_list.append(tl.TLight(tl_list[i], env.create_lane_to_det(), None,
                                         env.get_downstream(tl_list[i], args.reward, args.map), None,
-                                        [], args, execution=execution))
+                                        [], args,i, execution=execution))
         else:
             agent_list.append(tl.Light(tl_list[i], env.create_lane_to_det(), env.get_lane_map(tl_list[i]),
                                        env.get_downstream(tl_list[i], args.reward), env.get_upstream(tl_list[i]),
-                                       [], args))
+                                       [], args,i))
     # for agent in agent_list:
     #     agent._light = env.get_far_agent(agent.tl_id, agent_list)
     return agent_list

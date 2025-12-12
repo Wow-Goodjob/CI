@@ -64,6 +64,23 @@ class PPOAgent(Agent):
 
         self.writer_step = 0
 
+
+    def test_buffer(self):
+        print(f"[PPOAgent {self.tl_id}] Testing buffer...")
+
+        test_state = np.random.randn(self.state_dim)
+        test_action = 1
+        test_logprob = 0.5
+        test_reward = 1.0
+        test_next_state = np.random.randn(self.state_dim)
+
+        self.write(test_state, test_action, test_logprob, test_reward, test_next_state, False, False, id=0)
+
+        if self.replay_buffers:
+            print(f"[PPOAgent {self.tl_id}] Buffer test passed. Size: {len(self.replay_buffers[0].s)}")
+        else:
+            print(f"[PPOAgent {self.tl_id}] Buffer test failed. No buffers.")
+
     def evaluate(self, s):  # When evaluating the policy, we select the action with the highest probability
         s = torch.unsqueeze(torch.tensor(s, dtype=torch.float), 0)
         a_prob = self.actor(s).detach().numpy().flatten()
@@ -84,9 +101,9 @@ class PPOAgent(Agent):
 
     def write(self, s, a, a_logprob, r, s_, dw, done, id=-1):
         # self.replay_buffer.store(s, self.a, self.a_logprob, r, s_, dw, done)
-        if len(self.replay_buffers) <= id:
+        if len(self.replay_buffers) <= self.total_steps:
             self.replay_buffers.append(PPOReplayBuffer(self.args, self.state_dim))
-        self.replay_buffers[id].store(s, a, a_logprob, r, s_, dw, done)
+        self.replay_buffers[self.total_steps].store(s, a, a_logprob, r, s_, dw, done)
         self.total_steps += 1
         self.a = a
         self.a_logprob = a_logprob

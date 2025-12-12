@@ -327,6 +327,9 @@ def main(exe=False, name=None, idx=0, comment="", seed='25', light_path=None, ra
 
     args.rate = ratio
 
+    args.joint_training=True
+    args.router_train_freq=3
+
     # if args.state_contain_action:
 
     # simulation data
@@ -363,7 +366,7 @@ def main(exe=False, name=None, idx=0, comment="", seed='25', light_path=None, ra
         pass
         # if args.agent_type != 'ppo':
         #     agents.load_buffer(name)
-    name = f'{ratio}_{args.algo}_0315'
+    name = f'{ratio}_{args.algo}_joint_0315'
     print('run:', name)
     ap.add_argument("--dir", type=str, default=name)
     if execute:
@@ -372,7 +375,7 @@ def main(exe=False, name=None, idx=0, comment="", seed='25', light_path=None, ra
 
     RouterNet = None
     adj_edge = None
-    if args.router:
+    if args.router or args.joint_training:
         from dqnagent import DQNAgent, CDQNAgent
         from ppoagent import PPOAgent
         adj_edge = env.find_adj_edge(f'./res/{args.map}/SUMO_roadnet_4_4_4_phase_Right_Green_turn.net.xml')
@@ -385,12 +388,16 @@ def main(exe=False, name=None, idx=0, comment="", seed='25', light_path=None, ra
         elif config.ROUTER_RL["ALGO"] == "PPO":
             RouterNet = PPOAgent(state_dim=state_dim, action_dim=args.direction, args=args, tl_id="veh", net_type="",
                                  net_config=config.ROUTER_RL)
+        agents.router_net=RouterNet
+        agents.adj_edge=adj_edge
+        agents.joint_training=args.joint_training
 
     max_t = 999
     loss = []
 
     if idx > 0:
-        RouterNet.load_model(name+'/ep50')
+        #RouterNet.load_model(name+'/ep50')
+        RouterNet.load_model('./model/0.5_astar_dqn_0315')
         print("########### LOADED ###########")
 
     for i in range(idx, args.episode):
@@ -441,7 +448,10 @@ def main(exe=False, name=None, idx=0, comment="", seed='25', light_path=None, ra
 
         traci.vehicletype.setTau('DEFAULT_VEHTYPE', 2.0)
 
-        reward, t, c, s, l, w, d, rt, _loss = episode.run(i, agents, o, args, execute, name, RouterNet, adj_edge, gen_cav)
+        if args.joint_training:
+            reward, t, c, s, l, w, d, rt, _loss=episode.run_joint(i, agents, o, args, execute, name, RouterNet, adj_edge, gen_cav)
+        else:
+            reward, t, c, s, l, w, d, rt, _loss = episode.run(i, agents, o, args, execute, name, RouterNet, adj_edge, gen_cav)
         awt.append(t)  # duration
         awc.append(c)  # waiting count
         aws.append(s)  # speed
@@ -485,7 +495,7 @@ def main(exe=False, name=None, idx=0, comment="", seed='25', light_path=None, ra
         if i >= 5 and i % 5 == 0:
             os.makedirs('./model/' + name + '/' + "ep" + str(i), exist_ok=True)
             # agents.save_model(name + '/' + "ep" + str(i))
-            if args.router:
+            if args.router or args.joint_training:
                 RouterNet.save_model(name + '/' + "ep" + str(i))
             # agents.save_buffer(name+'/'+"ep"+str(i))
         # if t <= 145.0:
@@ -913,6 +923,7 @@ def dso_base(rt=0.5):
 if __name__ == '__main__':
     torch.manual_seed(config.SIMULATION["SEED"])
     np.random.seed(config.SIMULATION["SEED"])
+    main(exe=False,name=None,idx=0,seed='25',light_path=None,ratio=0.5)
     #for rt in [0.5]:
      #for cav_seed in range(8, 108, 10):
 
@@ -933,4 +944,4 @@ if __name__ == '__main__':
     #greedy_strategy(path='./res/hangzhou/exe_2983.sumocfg',algo="dijkstra")  # baseline2 dij
     #self_org_base() #baseline3 self_org
     #nav_base() #baseline4 NAV
-    dso_base() #baseline5 DSO
+    #dso_base() #baseline5 DSO

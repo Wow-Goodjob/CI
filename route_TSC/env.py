@@ -15,7 +15,6 @@ import traffic_light as tl
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-
 def init_context(agent_list):
     for agent in agent_list:
         tl_id = agent.tl_id

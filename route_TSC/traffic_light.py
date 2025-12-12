@@ -79,8 +79,9 @@ class Light:
 
 # implement single agent
 class TLight(Light):
-    def __init__(self, tl_id, dic, dic_lane, dic_down, dic_up, _light, args, pfrl=False, execution=False):
+    def __init__(self, tl_id, dic, dic_lane, dic_down, dic_up, _light, args,tl_id_number, pfrl=False, execution=False):
         super(TLight, self).__init__(tl_id, dic, dic_lane, dic_down, dic_up, _light, args)
+        self.tl_id_number=tl_id_number
         self.pfrl = pfrl
         self.junction = config.INTERSECTION["JUNCTION"]
         self.agent_type = args.agent_type
@@ -243,7 +244,7 @@ class TLight(Light):
                     if self.args.agent_type in {'DQN'}:
                         agent.store(self.state, reward, next_state, done)
                     elif self.args.agent_type == "PPO":
-                        agent.write(self.state, a=a, a_logprob=a_logprob, r=reward, s_=next_state, dw=False, done=done)
+                        agent.write(self.state, a=a, a_logprob=a_logprob, r=reward, s_=next_state, dw=False, done=done, id=self.get_agent_id_num())
                     elif self.args.agent_type == "MAT":  # on-policy
                         pass
                     elif self.args.agent_type == "SAC":
@@ -292,6 +293,12 @@ class TLight(Light):
 
     def state_emb(self, state):
         return self.rl_model.get_embedding_state(state)
+
+    def get_agent_id(self):
+        return self.tl_id
+
+    def get_agent_id_num(self):
+        return self.tl_id_number
 
 
 class MaxPressureTSC(Light):
