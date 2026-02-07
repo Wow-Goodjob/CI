@@ -101,80 +101,104 @@ class PPOAgent(Agent):
 
     def write(self, s, a, a_logprob, r, s_, dw, done, id=-1):
         # self.replay_buffer.store(s, self.a, self.a_logprob, r, s_, dw, done)
-        if len(self.replay_buffers) <= self.total_steps:
+        while len(self.replay_buffers) <= id:
             self.replay_buffers.append(PPOReplayBuffer(self.args, self.state_dim))
-        self.replay_buffers[self.total_steps].store(s, a, a_logprob, r, s_, dw, done)
+        self.replay_buffers[id].store(s, a, a_logprob, r, s_, dw, done)
         self.total_steps += 1
         self.a = a
         self.a_logprob = a_logprob
 
     def learn(self, buf=None):
+        # 遍历所有的 ReplayBuffer
         for rb in self.replay_buffers:
+            # 1. 获取数据长度
             sz = len(rb.s)
+            if sz == 0:  # 如果没有数据，直接跳过
+                continue
+
+            # 2. 提取数据
             s, a, a_logprob, r, s_, dw, done = rb.s, rb.a, rb.a_logprob, rb.r, rb.s_, rb.dw, rb.done
-            s = torch.tensor(s, dtype=torch.float).to(device)
-            a = torch.tensor(a, dtype=torch.long).to(device)  # In discrete action space, 'a' needs to be torch.long
-            a_logprob = torch.tensor(a_logprob, dtype=torch.float).to(device)
-            r = torch.tensor(r, dtype=torch.float).to(device)
-            s_ = torch.tensor(s_, dtype=torch.float).to(device)
-            dw = torch.tensor(dw, dtype=torch.float).to(device)
-            done = torch.tensor(done, dtype=torch.float).to(device)
+
+            # 3. 【性能修复】先转为 numpy array，再转 tensor，消除 UserWarning
+            s = torch.tensor(np.array(s), dtype=torch.float).to(device)
+            a = torch.tensor(np.array(a), dtype=torch.long).to(device)
+            a_logprob = torch.tensor(np.array(a_logprob), dtype=torch.float).to(device)
+            r = torch.tensor(np.array(r), dtype=torch.float).to(device)
+            s_ = torch.tensor(np.array(s_), dtype=torch.float).to(device)
+            dw = torch.tensor(np.array(dw), dtype=torch.float).to(device)
+            done = torch.tensor(np.array(done), dtype=torch.float).to(device)
+
             """
                 Calculate the advantage using GAE
-                'dw=True' means dead or win, there is no next state s'
-                'done=True' represents the terminal of an episode(dead or win or reaching the max_episode_steps). When calculating the adv, if done=True, gae=0
             """
             adv = []
             gae = 0
-            with torch.no_grad():  # adv and v_target have no gradient
+            with torch.no_grad():
                 vs = self.critic(s)
                 vs_ = self.critic(s_)
                 deltas = r + self.gamma * (1.0 - dw) * vs_ - vs
-                for delta, d in zip(reversed(deltas.flatten().cpu().numpy()), reversed(done.flatten().cpu().numpy())):
+                # 注意：这里要转回 cpu numpy 进行循环计算
+                deltas_np = deltas.cpu().numpy().flatten()
+                done_np = done.cpu().numpy().flatten()
+
+                for delta, d in zip(reversed(deltas_np), reversed(done_np)):
                     gae = delta + self.gamma * self.lamda * gae * (1.0 - d)
                     adv.insert(0, gae)
-                adv = torch.tensor(adv, dtype=torch.float).view(-1, 1)
-                adv = adv.to(device)
+
+                adv = torch.tensor(adv, dtype=torch.float).view(-1, 1).to(device)
                 v_target = adv + vs
-                if self.use_adv_norm:  # Trick 1:advantage normalization
+                if self.use_adv_norm:
                     adv = ((adv - adv.mean()) / (adv.std() + 1e-5))
 
             # Optimize policy for K epochs:
             for _ in range(self.K_epochs):
-                # Random sampling and no repetition. 'False' indicates that training will continue even if the number of samples in the last time is less than mini_batch_size
-                for index in BatchSampler(SubsetRandomSampler(range(1)), sz, False):
-                    dist_now = Categorical(probs=self.actor(s[index]))
-                    dist_entropy = dist_now.entropy().view(-1, 1)  # shape(mini_batch_size X 1)
-                    a_logprob_now = dist_now.log_prob(a[index].squeeze()).view(-1, 1)  # shape(mini_batch_size X 1)
-                    # a/b=exp(log(a)-log(b))
-                    ratios = torch.exp(a_logprob_now - a_logprob[index])  # shape(mini_batch_size X 1)
+                # 4. 【逻辑修复】BatchSampler 的 range 必须是数据长度 sz，而不是 1
+                # 建议使用 self.mini_batch_size 进行小批次更新
+                batch_size_to_use = self.mini_batch_size if hasattr(self, 'mini_batch_size') else sz
 
-                    surr1 = ratios * adv[index]  # Only calculate the gradient of 'a_logprob_now' in ratios
+                for index in BatchSampler(SubsetRandomSampler(range(sz)), batch_size_to_use, False):
+                    # 重新计算 log_prob 和 entropy
+                    dist_now = Categorical(probs=self.actor(s[index]))
+                    dist_entropy = dist_now.entropy().view(-1, 1)
+                    a_logprob_now = dist_now.log_prob(a[index].squeeze()).view(-1, 1)
+
+                    # r = p_new / p_old
+                    ratios = torch.exp(a_logprob_now - a_logprob[index])
+
+                    surr1 = ratios * adv[index]
                     surr2 = torch.clamp(ratios, 1 - self.epsilon, 1 + self.epsilon) * adv[index]
-                    actor_loss = -torch.min(surr1,
-                                            surr2) - self.entropy_coef * dist_entropy  # shape(mini_batch_size X 1)
-                    # Update actor
+
+                    # Actor Loss
+                    actor_loss = -torch.min(surr1, surr2) - self.entropy_coef * dist_entropy
+
                     self.optimizer_actor.zero_grad()
                     actor_loss.mean().backward()
-                    if self.use_grad_clip:  # Trick 7: Gradient clip
+                    if self.use_grad_clip:
                         torch.nn.utils.clip_grad_norm_(self.actor.parameters(), 0.5)
                     self.optimizer_actor.step()
 
+                    # Critic Loss
                     v_s = self.critic(s[index])
                     critic_loss = F.mse_loss(v_target[index], v_s)
-                    # Update critic
+
                     self.optimizer_critic.zero_grad()
                     critic_loss.backward()
-                    if self.use_grad_clip:  # Trick 7: Gradient clip
+                    if self.use_grad_clip:
                         torch.nn.utils.clip_grad_norm_(self.critic.parameters(), 0.5)
                     self.optimizer_critic.step()
 
-                    # writer.add_scalar(f'ppo_actor_loss/{self.tl_id}', actor_loss.mean(), self.writer_step)
-                    # writer.add_scalar(f'ppo_critic_loss/{self.tl_id}', critic_loss.mean(), self.writer_step)
-                    # self.writer_step += 1
-
-        # if self.use_lr_decay:  # Trick 6:learning rate Decay
-        #     self.lr_decay(total_steps)
+            if hasattr(rb, 'clean'):
+                rb.clean()
+            else:
+                # 假设你的 buffer 内部是用 list 存储的，手动清空
+                rb.s = []
+                rb.a = []
+                rb.a_logprob = []
+                rb.r = []
+                rb.s_ = []
+                rb.dw = []
+                rb.done = []
+                rb.count = 0
 
     def lr_decay(self, total_steps):
         lr_a_now = self.lr_a * (1 - total_steps / self.max_train_steps)

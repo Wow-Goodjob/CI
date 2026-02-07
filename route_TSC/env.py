@@ -94,7 +94,6 @@ def get_agent_relative_vehicles(agent, div=False):
                       / get_lane_length(lanes[i]) * 7.5
     return vehicles, lanes
 
-
 def get_agent_vehicles(agent, div=True):
     dic = agent.get_dic()
     lanes = get_control_lanes(agent)
@@ -104,7 +103,6 @@ def get_agent_vehicles(agent, div=True):
         # times = times + get_waiting_time(dic[lanes[i]])
     # print(vehicles)
     return vehicles, lanes
-
 
 def get_agent_segment_vehicles(agent, div=True):
     lanes = list(set(get_control_lanes(agent)))
@@ -274,7 +272,7 @@ def get_pressure_reward(agent):
         pressure = pressure - tc.lane.getLastStepVehicleNumber(lane) / tc.lane.getLength(lane) * 7.5
     return -pressure
 
-
+'''
 # return waiting number and reward
 def get_reward(agent):
     # get sum length
@@ -333,7 +331,24 @@ def get_reward(agent):
         return length, -lane_length
     if agent.args.reward == "lane_pressure":
         return length, -op_lane_pressure
+'''
 
+
+def get_reward(agent):
+    # 1. 获取排队长度 (用于日志，不一定要用于 Reward)
+    v, _ = get_agent_vehicles(agent, div=False)
+    length = np.sum(v)
+
+    waiting_time = get_intersection_waiting(agent)
+
+    # 3. 修正日志记录 (记录真正的时间，而不是长度)
+    agent.set_waiting(waiting_time)
+
+    reward = -waiting_time
+
+    reward = reward / 100.0
+
+    return waiting_time, reward
 
 def norm_clip_reward(reward):
     return reward
@@ -765,7 +780,6 @@ def get_map_lanes(agent_list, all_lanes):
         edges.extend(light_dict[agent.tl_id])
         count_light.append(count)
     return edges, count_light, lane_dict
-
 
 if __name__ == '__main__':
     start(execution=False, path='./res/hangzhou/train.sumocfg', seed='25', gui=None)

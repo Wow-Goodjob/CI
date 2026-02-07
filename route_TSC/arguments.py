@@ -17,7 +17,7 @@ def get_common_args(EXEC=False):
 
     ap.add_argument("--l2v", type=bool, default=False)
 
-    ap.add_argument("--algo", type=str, default="astar_dqn", choices=["self_org", "hatt_router", "iql_b", "astar_dqn", "adaptive", "nav", "dso"])
+    ap.add_argument("--algo", type=str, default="hatt_router", choices=["self_org", "hatt_router", "iql_b", "astar_dqn", "adaptive", "nav", "dso"])
 
     ap.add_argument("--threshold", type=int, default=10000)
 
@@ -26,7 +26,7 @@ def get_common_args(EXEC=False):
     ap.add_argument("--org", type=str, default="fixed")
     ap.add_argument("--router", type=bool, default=True)
     ap.add_argument("--use_attention", type=bool, default=True)
-    ap.add_argument("--lighter", type=bool, default=False)
+    ap.add_argument("--lighter", type=bool, default=True)
     ap.add_argument("--decay", type=bool, default=False)
     ap.add_argument("--map", type=str, default="hangzhou")
     ap.add_argument("--agent_num", type=int, default=16)
@@ -38,7 +38,7 @@ def get_common_args(EXEC=False):
     ap.add_argument("--direction", type=int, default=3)
     # ap.add_argument("--action_embedding", type=int, default=2)
     #ap.add_argument("--state_dim", type=int, default=38)  # state_dim = 16 + phase + phase_duration
-    ap.add_argument("--state_dim", type=int, default=36)  # state_dim = 16 + phase + phase_duration
+    ap.add_argument("--state_dim", type=int, default=37)  # state_dim = 16 + phase + phase_duration
     ap.add_argument("--global_state_dim", type=int, default=50 * 9)
     ap.add_argument("--counter_factual",type=float,default=1e-5)
 
@@ -47,12 +47,12 @@ def get_common_args(EXEC=False):
         ap.add_argument("--episode", type=int, default=1)
         ap.add_argument("--buffer_size", type=int, default=0)
     else:
-        ap.add_argument("--episode", type=int, default=70)
+        ap.add_argument("--episode", type=int, default=100)
         ap.add_argument("--buffer_size", type=int, default=1000)
     ap.add_argument("--train_eps", type=int, default=35)
     ap.add_argument("--train_thr", type=int, default=0)
     ap.add_argument("--reward", type=str, default="length", choices=["length", "pressure", "waiting", "first_waiting"])
-    ap.add_argument("--agent_type", type=str, default='PPO',
+    ap.add_argument("--agent_type", type=str, default='PS-PPO',
                     choices=['DQN', 'QMIX', 'DDPG', 'TD3', 'PPO', "MAT", "MAPPO", "MA2C", "CCGN", "CenPPO", "PS-PPO"])
     ap.add_argument("--spatial", type=str, default='FC', choices=['GAT', 'SAGE', "FC", "ORD_GAT"])
     ap.add_argument("--temporal", type=str, default='FC', choices=['GRU', 'LSTM', "FC"])

@@ -16,6 +16,7 @@ import net
 from algo.p_buffer import PrioritizedReplayBuffer
 from algo.prioritized_memory import Memory
 import config
+import Causal
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -299,7 +300,7 @@ class CAVAgent:
             traci.vehicle.setRoute(self.veh_id, new_route)
             return True, action, False
 
-    def get_reward(self, road_state=None):
+    def get_reward(self, road_state=None,ATE=0):
         if self.done:
             # dt = traci.simulation.getTime() - self.act_time
             # return -dt
@@ -325,7 +326,7 @@ class CAVAgent:
             # self.penalty = min(0, self.dc - dc) / 11.11
             # self.dc = dc
             self.penalty = 0
-            dt = traci.simulation.getTime() - self.act_time + self.penalty
+            dt = traci.simulation.getTime() - self.act_time + self.penalty - ATE
             return -dt
 
             # scaled BRP

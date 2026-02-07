@@ -1,0 +1,14 @@
+import torch
+LR = 3e-4
+GAMMA = 0.99
+GAE_LAMBDA = 0.95
+CLIP_EPS = 0.2
+ENTROPY_COEF = 0.01
+BATCH_SIZE = 64
+TOTAL_TIMESTEPS = 1e6
+VALUE_COEF = 0.5
+MAX_GRAD_NORM = 0.5
+UPDATE_EPOCHS=10
+SIGNAL_INTERVAL=10
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"

@@ -1,0 +1,2 @@
+total_vehicles,avg_trip_time,median_trip_time,min_trip_time,max_trip_time,std_trip_time,avg_waiting_time,avg_time_loss,avg_speed,avg_distance,percentile_10,percentile_25,percentile_50,percentile_75,percentile_90,percentile_95,percentile_99,by_vehicle_type
+718,455.13788300835654,456.5,113.0,874.0,175.0875029276094,122.0,155.6775348189415,0.0,3329.9099164345407,215.0,309.0,456.5,591.0,692.3000000000001,756.0,809.83,"{'DEFAULT_VEHTYPE': {'count': 718, 'mean': 455.13788300835654, 'std': 175.0875029276094, 'min': 113.0, 'max': 874.0}}"

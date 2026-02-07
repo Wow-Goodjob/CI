@@ -6,6 +6,9 @@
 	</input>
 	<time>
 		<begin value="0"/>
-		<end value="3600"/>
+		<end value="1800"/>
 	</time>
+	<output>
+	    <tripinfo-output value="tripinfo_output_route.xml"/>
+	</output>
 </configuration>
